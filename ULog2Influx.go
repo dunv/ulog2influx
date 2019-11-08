@@ -19,6 +19,7 @@ type Ulog2InfluxWriter struct {
 	Client           influx.Client
 	LogLineChannel   chan *influx.Point
 	TimeZone         *time.Location
+	FlushInterval    time.Duration
 }
 
 func NewUlog2InfluxWriter(
@@ -27,6 +28,7 @@ func NewUlog2InfluxWriter(
 	influxUser string,
 	influxPassword string,
 	influxDB string,
+	flushInterval time.Duration,
 ) (*Ulog2InfluxWriter, error) {
 	c, err := influx.NewHTTPClient(influx.HTTPConfig{
 		Addr:     influxURL,
@@ -37,7 +39,7 @@ func NewUlog2InfluxWriter(
 		return nil, err
 	}
 	logLineChannel := make(chan *influx.Point)
-	go asyncPushRoutine(c, influxDB, -1, logLineChannel)
+	go asyncPushRoutine(c, influxDB, -1, logLineChannel, flushInterval)
 	writer := &Ulog2InfluxWriter{
 		InfluxMetricName: influxMetricName,
 		InfluxURL:        influxURL,
@@ -47,6 +49,7 @@ func NewUlog2InfluxWriter(
 		Client:           c,
 		LogLineChannel:   logLineChannel,
 		TimeZone:         time.UTC,
+		FlushInterval:    flushInterval,
 	}
 	return writer, nil
 }
@@ -121,5 +124,3 @@ func (w *Ulog2InfluxWriter) Write(p []byte) (n int, err error) {
 
 	return len(p), nil
 }
-
-// influxLine = fmt.Sprintf("%s,%s,log_level=%s,service_name=%s count=%d,thread=\"%s\",location=\"%s\",message=\"%s\"%s%s %d",
