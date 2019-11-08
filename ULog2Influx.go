@@ -18,6 +18,7 @@ type Ulog2InfluxWriter struct {
 	AdditionalFields map[string]interface{}
 	Client           influx.Client
 	LogLineChannel   chan *influx.Point
+	TimeZone         *time.Location
 }
 
 func NewUlog2InfluxWriter(
@@ -45,6 +46,7 @@ func NewUlog2InfluxWriter(
 		InfluxDB:         influxDB,
 		Client:           c,
 		LogLineChannel:   logLineChannel,
+		TimeZone:         time.UTC,
 	}
 	return writer, nil
 }
@@ -57,15 +59,21 @@ func (w *Ulog2InfluxWriter) SetAdditionalFields(additionalFields map[string]inte
 	w.AdditionalFields = additionalFields
 }
 
+func (w *Ulog2InfluxWriter) SetTimezone(tz *time.Location) {
+	w.TimeZone = tz
+}
+
 func (w *Ulog2InfluxWriter) Write(p []byte) (n int, err error) {
 	parts := strings.Split(string(p), " | ")
 
 	if len(parts) < 5 {
+		fmt.Println("could not send logline to influx, parsing err (line has to few parts)")
 		return 0, fmt.Errorf("could not send logline to influx, parsing err (line has to few parts)")
 	}
 
-	parsedTime, err := time.Parse("2006-01-02 15:04:05.000", strings.TrimSpace(parts[0]))
+	parsedTime, err := time.ParseInLocation("2006-01-02 15:04:05.000", strings.TrimSpace(parts[0]), w.TimeZone)
 	if err != nil {
+		fmt.Println("could not parse time", err)
 		return 0, fmt.Errorf("could not parse time (%s)", err)
 	}
 
@@ -77,7 +85,7 @@ func (w *Ulog2InfluxWriter) Write(p []byte) (n int, err error) {
 	parsedMessage := strings.Join(parts[4:], " | ")
 	parsedMessage = strings.ReplaceAll(parsedMessage, `\`, `/`)
 	parsedMessage = strings.ReplaceAll(parsedMessage, `"`, `\"`)
-	parsedMessage = strings.TrimSuffix(strings.TrimSpace(parsedMessage), "\n")
+	parsedMessage = strings.TrimSuffix(parsedMessage, "\n")
 
 	// fmt.Println("time", parsedTime)
 	// fmt.Println("level", parsedLogLevel)
