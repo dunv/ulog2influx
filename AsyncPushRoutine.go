@@ -38,7 +38,7 @@ func asyncPushRoutine(
 				castedPoint := point.(*influx.Point)
 				// make sure, that no two points are in the exact same nanosecond
 				if previousCastedPoint != nil {
-					timeDiff := previousCastedPoint.Time().Sub(castedPoint.Time())
+					timeDiff := castedPoint.Time().Sub(previousCastedPoint.Time())
 					if timeDiff.Milliseconds() < 1 {
 						// fmt.Println("detected same millisecond -> increasing by on nanosecond")
 						castedPointFields, err := castedPoint.Fields()
