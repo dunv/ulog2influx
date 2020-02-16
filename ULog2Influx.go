@@ -69,7 +69,7 @@ func (w *Ulog2InfluxWriter) SetTimezone(tz *time.Location) {
 func (w *Ulog2InfluxWriter) Write(p []byte) (n int, err error) {
 	parts := strings.Split(string(p), " | ")
 
-	if len(parts) < 5 {
+	if len(parts) < 4 {
 		fmt.Println("could not send logline to influx, parsing err (line has to few parts)")
 		return 0, fmt.Errorf("could not send logline to influx, parsing err (line has to few parts)")
 	}
@@ -81,11 +81,11 @@ func (w *Ulog2InfluxWriter) Write(p []byte) (n int, err error) {
 	}
 
 	parsedLogLevel := strings.TrimSpace(parts[1])
-	parsedThread := strings.TrimSpace(parts[2])
-	parsedLocation := strings.TrimSpace(parts[3])
+	// parsedThread := strings.TrimSpace(parts[2])
+	parsedLocation := strings.TrimSpace(parts[2])
 
 	// Take the rest of the line and escape characters for influx
-	parsedMessage := strings.Join(parts[4:], " | ")
+	parsedMessage := strings.Join(parts[3:], " | ")
 	parsedMessage = strings.ReplaceAll(parsedMessage, `\`, `/`)
 	parsedMessage = strings.ReplaceAll(parsedMessage, `"`, `\"`)
 	parsedMessage = strings.TrimSuffix(parsedMessage, "\n")
@@ -105,7 +105,7 @@ func (w *Ulog2InfluxWriter) Write(p []byte) (n int, err error) {
 	}
 
 	fields := map[string]interface{}{
-		"thread":   parsedThread,
+		// "thread":   parsedThread,
 		"location": parsedLocation,
 		"message":  parsedMessage,
 	}
