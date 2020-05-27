@@ -9,17 +9,19 @@ import (
 )
 
 type Ulog2InfluxWriter struct {
-	InfluxMetricName string
-	InfluxURL        string
-	InfluxUser       string
-	InfluxPassword   string
-	InfluxDB         string
-	AdditionalTags   map[string]string
-	AdditionalFields map[string]interface{}
-	Client           influx.Client
-	LogLineChannel   chan *influx.Point
-	TimeZone         *time.Location
-	FlushInterval    time.Duration
+	InfluxMetricName    string
+	InfluxURL           string
+	InfluxUser          string
+	InfluxPassword      string
+	InfluxDB            string
+	AdditionalTags      map[string]string
+	AdditionalFields    map[string]interface{}
+	Client              influx.Client
+	LogLineChannel      chan *influx.Point
+	TimeZone            *time.Location
+	FlushInterval       time.Duration
+	SeparationCharacter string
+	FieldMapping        map[int]string
 }
 
 func NewUlog2InfluxWriter(
@@ -29,6 +31,8 @@ func NewUlog2InfluxWriter(
 	influxPassword string,
 	influxDB string,
 	flushInterval time.Duration,
+	separationCharacter *string,
+	fieldMapping map[int]string,
 ) (*Ulog2InfluxWriter, error) {
 	c, err := influx.NewHTTPClient(influx.HTTPConfig{
 		Addr:     influxURL,
@@ -40,16 +44,34 @@ func NewUlog2InfluxWriter(
 	}
 	logLineChannel := make(chan *influx.Point)
 	go asyncPushRoutine(c, influxDB, -1, logLineChannel, flushInterval)
+
+	usedSeparationCharacter := " | "
+	if separationCharacter != nil {
+		usedSeparationCharacter = *separationCharacter
+	}
+
+	usedFieldMapping := map[int]string{
+		0: "ts",
+		1: "tag:log_level",
+		2: "field:location",
+		3: "field:message",
+	}
+	if fieldMapping != nil {
+		usedFieldMapping = fieldMapping
+	}
+
 	writer := &Ulog2InfluxWriter{
-		InfluxMetricName: influxMetricName,
-		InfluxURL:        influxURL,
-		InfluxUser:       influxUser,
-		InfluxPassword:   influxPassword,
-		InfluxDB:         influxDB,
-		Client:           c,
-		LogLineChannel:   logLineChannel,
-		TimeZone:         time.UTC,
-		FlushInterval:    flushInterval,
+		InfluxMetricName:    influxMetricName,
+		InfluxURL:           influxURL,
+		InfluxUser:          influxUser,
+		InfluxPassword:      influxPassword,
+		InfluxDB:            influxDB,
+		Client:              c,
+		LogLineChannel:      logLineChannel,
+		TimeZone:            time.UTC,
+		FlushInterval:       flushInterval,
+		SeparationCharacter: usedSeparationCharacter,
+		FieldMapping:        usedFieldMapping,
 	}
 	return writer, nil
 }
@@ -67,51 +89,59 @@ func (w *Ulog2InfluxWriter) SetTimezone(tz *time.Location) {
 }
 
 func (w *Ulog2InfluxWriter) Write(p []byte) (n int, err error) {
-	parts := strings.Split(string(p), " | ")
+	parts := strings.Split(string(p), w.SeparationCharacter)
 
-	if len(parts) < 4 {
+	if len(parts) < len(w.FieldMapping) {
 		fmt.Println("could not send logline to influx, parsing err (line has to few parts)")
 		return 0, fmt.Errorf("could not send logline to influx, parsing err (line has to few parts)")
 	}
 
-	parsedTime, err := time.ParseInLocation("2006-01-02 15:04:05.000", strings.TrimSpace(parts[0]), w.TimeZone)
-	if err != nil {
-		fmt.Println("could not parse time", err)
-		return 0, fmt.Errorf("could not parse time (%s)", err)
-	}
-
-	parsedLogLevel := strings.TrimSpace(parts[1])
-	// parsedThread := strings.TrimSpace(parts[2])
-	parsedLocation := strings.TrimSpace(parts[2])
-
-	// Take the rest of the line and escape characters for influx
-	parsedMessage := strings.Join(parts[3:], " | ")
-	parsedMessage = strings.ReplaceAll(parsedMessage, `\`, `/`)
-	parsedMessage = strings.ReplaceAll(parsedMessage, `"`, `\"`)
-	parsedMessage = strings.TrimSuffix(parsedMessage, "\n")
-
-	// fmt.Println("time", parsedTime)
-	// fmt.Println("level", parsedLogLevel)
-	// fmt.Println("thread", parsedThread)
-	// fmt.Println("location", parsedLocation)
-	// fmt.Println("message", parsedMessage)
-
-	tags := map[string]string{
-		"log_level": parsedLogLevel,
-	}
-
+	tags := map[string]string{}
 	for name, value := range w.AdditionalTags {
 		tags[name] = value
 	}
-
-	fields := map[string]interface{}{
-		// "thread":   parsedThread,
-		"location": parsedLocation,
-		"message":  parsedMessage,
-	}
-
+	fields := map[string]interface{}{}
 	for name, value := range w.AdditionalFields {
 		fields[name] = value
+	}
+
+	var parsedTime time.Time
+	count := 0
+	for index, classification := range w.FieldMapping {
+		content := parts[index]
+		// Figure out which field is the last one and merge all parts after that into one
+		if count == len(w.FieldMapping) {
+			content = strings.Join(parts[3:], w.SeparationCharacter)
+		}
+		count++
+		// Clean up
+		content = strings.TrimSpace(content)
+		content = strings.ReplaceAll(content, `\`, `/`)
+		content = strings.ReplaceAll(content, `"`, `\"`)
+		content = strings.TrimSuffix(content, "\n")
+
+		if classification == "ts" {
+			parsedTime, err = time.ParseInLocation("2006-01-02 15:04:05.000", content, w.TimeZone)
+			if err != nil {
+				fmt.Println("could not parse time", err)
+				return 0, fmt.Errorf("could not parse time (%s)", err)
+			}
+			continue
+		}
+		classificationParts := strings.Split(classification, ":")
+		if len(classificationParts) != 2 {
+			fmt.Println("classification needs to contain field:fieldname or tag:tagname")
+			return 0, fmt.Errorf("classification needs to contain field:fieldname or tag:tagname")
+		}
+
+		if classificationParts[0] == "tag" {
+			tags[classificationParts[1]] = content
+			continue
+		}
+		if classificationParts[0] == "field" {
+			fields[classificationParts[1]] = content
+			continue
+		}
 	}
 
 	point, err := influx.NewPoint(w.InfluxMetricName, tags, fields, parsedTime)

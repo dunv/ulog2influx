@@ -19,7 +19,7 @@ func asyncPushRoutine(
 	returnChannel := make(chan bool)
 	go func() {
 		for logLine := range logLineChannel {
-			list.Append(logLine)
+			list.Push(logLine)
 		}
 	}()
 
